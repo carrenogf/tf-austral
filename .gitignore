@@ -1,0 +1,60 @@
+# Modelos y datos
+/models
+/datasets
+*.pkl
+*.h5
+*.pth
+
+# Archivos de datos
+*.csv
+*.json
+*.xlsx
+*.xls
+
+# Bases de datos
+*.db
+*.sqlite
+*.sqlite3
+*.db-shm
+*.db-wal
+
+# Logs y temporales
+/logs
+/temp
+*.tmp
+*.log
+
+# Entornos virtuales
+venv/
+env/
+.venv/
+ENV/
+__pycache__/
+
+# Python
+*.pyc
+*.pyo
+*.py[cod]
+*.egg-info
+.pytest_cache/
+*.so
+
+# Jupyter Notebook
+.ipynb_checkpoints/
+
+# Variables de entorno
+.env
+.env.local
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Sistema operativo
+.DS_Store
+Thumbs.db
+
+# Otros
+*.carpet
