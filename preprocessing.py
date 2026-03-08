@@ -24,7 +24,7 @@ import warnings
 warnings.filterwarnings("ignore")
 
 
-def preprocess(dataset_dir="./datasets", train_file="df_train.csv", val_file="df_val.csv", test_file="df_test.csv"):
+def preprocess(dataset_dir="./datasets", train_file="2022-2023.csv", val_file="2024.csv", test_file="2025.csv"):
   """
   Preprocesa train/val/test usando el mismo mapeo de clases, columnas de OHE y pipeline de texto.
   Se generan df_preprocessed_train/val/test en la carpeta datasets.
@@ -48,12 +48,23 @@ def preprocess(dataset_dir="./datasets", train_file="df_train.csv", val_file="df
       dfs[split] = pd.read_csv(path)
       print(f"   ✓ {split}: {len(dfs[split])} registros, {len(dfs[split].columns)} columnas")
 
-    # Eliminar columnas que no sirven (se ajusta sobre train y se replica)
-    drop_cols = ["DescCuenta","NTesoreria","DescTesoreria","DescEntidad","Beneficiario","Cuit"]
-    print("\n[2/6] Eliminando columnas innecesarias...")
+    # # Eliminar columnas que no sirven (se ajusta sobre train y se replica)
+    # drop_cols = ["DescCuenta","NTesoreria","DescTesoreria","DescEntidad","Beneficiario","Cuit"]
+    # print("\n[2/6] Eliminando columnas innecesarias...")
+    # for split in dfs:
+    #   dfs[split] = eliminar_columnas(dfs[split], drop_cols)
+    #   print(f"   ✓ {split}: {len(dfs[split].columns)} columnas")
+
+    # seleccionar columnas necesarias
+    required_cols = ["TipoComp",	"Ncuenta","NEntidad",	"TipoPres",	"TipoReg",	"ClaseReg",	"Cod",
+                      "FteFin",	"Descripcion",	"TipoCta",	"CodBco",	"Class"]
+    
+    print("\n[2/6] Seleccionando columnas necesarias...")
+
     for split in dfs:
-      dfs[split] = eliminar_columnas(dfs[split], drop_cols)
+      dfs[split] = dfs[split][required_cols]
       print(f"   ✓ {split}: {len(dfs[split].columns)} columnas")
+
 
     # Imputar NA's
     print("\n[3/6] Imputando valores NA...")
