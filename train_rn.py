@@ -71,7 +71,7 @@ def train_red_neuronal(path_df, study_name, ntrials, flag_generar_archivo=False)
     df = pd.read_csv(path_df, sep=";")
     
     numeric_columns = get_numeric_columns(df)
-    categorical_columns = get_categorical_columns(df, ['Descripcion', 'texto_limpio'])
+    categorical_columns = get_categorical_columns(df, ['descripcion', 'texto_limpio'])
     text_colummns = ["texto_limpio"]
     pesos_columns = [col for col in numeric_columns if col.startswith('pesos_')]
     numeric_columns = [col for col in numeric_columns if not col.startswith('pesos_')]
@@ -506,22 +506,22 @@ def red_neuronal_basica_ivan(path_df, study, trials):
   df = pd.read_excel(path_df)
   print(f"{datetime.now()} - Inicio preprocessing \n")
   df.drop(columns=["DescCuenta","NTesoreria","DescTesoreria","DescEntidad","Beneficiario"], axis=1)
-  df["Descripcion"] = df["Descripcion"].fillna("")
-  df["ClaseReg"] = df["ClaseReg"].fillna("Indefinido")
+  df["descripcion"] = df["descripcion"].fillna("")
+  df["clase_reg"] = df["clase_reg"].fillna("Indefinido")
   Class = list(df.Class.unique())
   clases = {val:Class.index(val) for val in Class}
   def get_class(val):
       return clases[val]
   df['target'] = df['Class'].apply(get_class)
   print(f"{datetime.now()} - Inicio feature engineering \n")
-  df['Descripcion'] = df['Descripcion'].astype(str)   
-  df['text_size'] = df['Descripcion'].str.len()
-  df['text_words_count'] = df['Descripcion'].apply(lambda x: len(x.split()))
+  df['descripcion'] = df['descripcion'].astype(str)   
+  df['text_size'] = df['descripcion'].str.len()
+  df['text_words_count'] = df['descripcion'].apply(lambda x: len(x.split()))
   print(f"{datetime.now()} - Calculamos pesos \n")
   dictOfWords = {}
   for target in df.target.unique():
     df_target = df[df["target"]==target]
-    all_descriptions = ' '.join(df_target['Descripcion'].dropna())  # Concatenar todas las descripciones
+    all_descriptions = ' '.join(df_target['descripcion'].dropna())  # Concatenar todas las descripciones
     nlp = spacy.load("es_core_news_sm")
     doc = nlp(all_descriptions)
     clean_text = []
@@ -537,7 +537,7 @@ def red_neuronal_basica_ivan(path_df, study, trials):
     freq_of_words = pd.Series(clean_text).value_counts()
     dic_words = freq_of_words.to_dict()
     dictOfWords[str(target)] = dic_words
-    df[f'pesos_{target}'] = df['Descripcion'].apply(pesos,dic_words=dic_words)
+    df[f'pesos_{target}'] = df['descripcion'].apply(pesos,dic_words=dic_words)
 
   # Parámetros
   nb_classes = df['target'].nunique()  # Número de clases en la columna target
@@ -547,8 +547,8 @@ def red_neuronal_basica_ivan(path_df, study, trials):
   print(f"{datetime.now()} - Tokenizamos \n")
   # Tokenizar el texto (convierte 'texto_limpio' de objeto a una matriz numérica)
   tokenizer = Tokenizer(num_words=max_words)
-  tokenizer.fit_on_texts(df['Descripcion'].astype(str))  # Asegúrate de que sea tratado como cadena de texto
-  X = tokenizer.texts_to_matrix(df['Descripcion'].astype(str), mode='tfidf')  # Convierte el texto a TF-IDF
+  tokenizer.fit_on_texts(df['descripcion'].astype(str))  # Asegúrate de que sea tratado como cadena de texto
+  X = tokenizer.texts_to_matrix(df['descripcion'].astype(str), mode='tfidf')  # Convierte el texto a TF-IDF
 
   # Convertir la columna 'target' a one-hot encoding
   y = to_categorical(df['target'], nb_classes)
@@ -702,8 +702,8 @@ def preprocessing(path_df):
   
   df.drop(columns=["DescCuenta","NTesoreria","DescTesoreria","DescEntidad","Beneficiario"], inplace=True)
   
-  df["Descripcion"] = df["Descripcion"].fillna("")
-  df["ClaseReg"] = df["ClaseReg"].fillna("Indefinido")
+  df["descripcion"] = df["descripcion"].fillna("")
+  df["clase_reg"] = df["clase_reg"].fillna("Indefinido")
   
   
   Class = list(df.Class.unique())
@@ -713,7 +713,7 @@ def preprocessing(path_df):
     
   df['target'] = df['Class'].apply(get_class)
   df.drop(columns=['Class'], inplace=True)
-  df["texto_limpio"] = df["Descripcion"].apply(pre_procesamiento_texto)
+  df["texto_limpio"] = df["descripcion"].apply(pre_procesamiento_texto)
   
   return df
 
@@ -723,16 +723,16 @@ def featureEngineering(df):
   Creamos features de texto y features de pesos sobre el texto limpio.
   """
   # features de texto -----------------------------------------------------------------------
-  df['Descripcion'] = df['Descripcion'].astype(str)   
-  df['description_size'] = df['Descripcion'].str.len()
-  df['description_words_count'] = df['Descripcion'].apply(lambda x: len(x.split())) 
-  df.drop(columns=['Descripcion'], inplace=True)
+  df['descripcion'] = df['descripcion'].astype(str)   
+  df['descripcion_size'] = df['descripcion'].str.len()
+  df['descripcion_words_count'] = df['descripcion'].apply(lambda x: len(x.split())) 
+  df.drop(columns=['descripcion'], inplace=True)
   
   df['texto_limpio'] = df['texto_limpio'].astype(str)   
   df['text_size'] = df['texto_limpio'].str.len()
   df['text_words_count'] = df['texto_limpio'].apply(lambda x: len(x.split()))  
   
-  categ = ['TipoComp','TipoPres','TipoReg','ClaseReg','TipoCta']
+  categ = ['tipo_comp','tipo_pres','tipo_reg','clase_reg','tipo_cta']
   for col in categ:
       df = pd.concat([df,pd.get_dummies(df[col],prefix=col, prefix_sep='_')],axis=1)
       df.drop(col, axis=1, inplace=True)

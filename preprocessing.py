@@ -56,8 +56,8 @@ def preprocess(dataset_dir="./datasets", train_file="2022-2023.csv", val_file="2
     #   print(f"   ✓ {split}: {len(dfs[split].columns)} columnas")
 
     # seleccionar columnas necesarias
-    required_cols = ["TipoComp",	"Ncuenta","NEntidad",	"TipoPres",	"TipoReg",	"ClaseReg",	"Cod",
-                      "FteFin",	"Descripcion",	"TipoCta",	"CodBco",	"Class"]
+    required_cols = ["tipo_comp",	"nro_cuenta","nro_entidad",	"tipo_pres",	"tipo_reg",	"clase_reg",	"cod",
+                      "fuente_fin",	"descripcion",	"tipo_cta",	"cod_bco",	"Class"]
     
     print("\n[2/6] Seleccionando columnas necesarias...")
 
@@ -83,14 +83,14 @@ def preprocess(dataset_dir="./datasets", train_file="2022-2023.csv", val_file="2
     print("\n[5/6] Aplicando preprocesamiento de texto...")
     print("   (Esto puede tomar varios minutos)")
     for split in dfs:
-      dfs[split]["texto_limpio"] = dfs[split]["Descripcion"].apply(pre_procesamiento_texto)
+      dfs[split]["texto_limpio"] = dfs[split]["descripcion"].apply(pre_procesamiento_texto)
     print("   ✓ Texto procesado para train/val/test")
 
     # OneHotEncoding de variables categóricas con columnas definidas por train
     print("\n[6/6] Aplicando OneHotEncoding a variables categóricas con base en train...")
     dfs["train"], dfs["val"], dfs["test"] = aplicar_ohe_splits(
       dfs["train"], dfs["val"], dfs["test"],
-      columnas=['TipoComp','TipoReg','ClaseReg','TipoCta']
+      columnas=['tipo_comp','tipo_reg','clase_reg','tipo_cta']
     )
     print("   ✓ OneHotEncoding completado")
 
@@ -135,12 +135,12 @@ def eliminar_columnas(df, columnas):
 def imputarNA(df):
   """
   """
-  na_descripcion = df["Descripcion"].isna().sum()
-  na_clasereg = df["ClaseReg"].isna().sum()
-  print(f"   - NAs en 'Descripcion': {na_descripcion}")
-  print(f"   - NAs en 'ClaseReg': {na_clasereg}")
-  df["Descripcion"] = df["Descripcion"].fillna("")
-  df["ClaseReg"] = df["ClaseReg"].fillna("Indefinido")
+  na_descripcion = df["descripcion"].isna().sum()
+  na_clasereg = df["clase_reg"].isna().sum()
+  print(f"   - NAs en 'descripcion': {na_descripcion}")
+  print(f"   - NAs en 'clase_reg': {na_clasereg}")
+  df["descripcion"] = df["descripcion"].fillna("")
+  df["clase_reg"] = df["clase_reg"].fillna("Indefinido")
   return df
 
 

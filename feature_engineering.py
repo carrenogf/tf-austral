@@ -35,8 +35,8 @@ def fe(dataset_dir="./datasets"):
     # eliminamos variables que no sirven
     print("\n[3/7] Eliminando variables innecesarias...")
     for split in dfs:
-      dfs[split].drop(columns=['Descripcion'], inplace=True)
-      print(f"   ✓ {split}: columna 'Descripcion' eliminada. Columnas restantes: {len(dfs[split].columns)}")
+      dfs[split].drop(columns=['descripcion'], inplace=True)
+      print(f"   ✓ {split}: columna 'descripcion' eliminada. Columnas restantes: {len(dfs[split].columns)}")
 
     print("\n[4/7] OneHotEncoding ya fue aplicado en el preprocesamiento")
         
@@ -90,11 +90,11 @@ def fe(dataset_dir="./datasets"):
 def crear_variablesTexto(df):
   """
   """
-  df['Descripcion'] = df['Descripcion'].astype(str)
+  df['descripcion'] = df['descripcion'].astype(str)
   df['texto_limpio'] = df['texto_limpio'].astype(str)
   
-  df['descripcion_size'] = df['Descripcion'].str.len()
-  df['descripcion_words_count'] = df['Descripcion'].apply(lambda x: len(x.split()))  
+  df['descripcion_size'] = df['descripcion'].str.len()
+  df['descripcion_words_count'] = df['descripcion'].apply(lambda x: len(x.split()))  
 
   df['text_size'] = df['texto_limpio'].str.len()
   df['text_words_count'] = df['texto_limpio'].apply(lambda x: len(x.split()))
