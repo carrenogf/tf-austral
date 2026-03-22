@@ -24,7 +24,7 @@ import warnings
 warnings.filterwarnings("ignore")
 
 
-def preprocess(dataset_dir="./datasets", train_file="2022-2023.csv", val_file="2024.csv", test_file="2025.csv"):
+def preprocess(dataset_dir="./datasets", train_file="2022-2023-2024.csv", val_file="2025-1.csv", test_file="2025-2.csv"):
   """
   Preprocesa train/val/test usando el mismo mapeo de clases, columnas de OHE y pipeline de texto.
   Se generan df_preprocessed_train/val/test en la carpeta datasets.
@@ -56,7 +56,7 @@ def preprocess(dataset_dir="./datasets", train_file="2022-2023.csv", val_file="2
     #   print(f"   ✓ {split}: {len(dfs[split].columns)} columnas")
 
     # seleccionar columnas necesarias
-    required_cols = ["tipo_comp",	"nro_cuenta","nro_entidad",	"tipo_pres",	"tipo_reg",	"clase_reg",	"cod",
+    required_cols = ["tipo_comp",	"nro_cuenta","nro_entidad","desc_entidad",	"tipo_pres",	"tipo_reg",	"clase_reg",	"cod",
                       "fuente_fin",	"descripcion",	"tipo_cta",	"cod_bco",	"Class"]
     
     print("\n[2/6] Seleccionando columnas necesarias...")
@@ -90,7 +90,7 @@ def preprocess(dataset_dir="./datasets", train_file="2022-2023.csv", val_file="2
     print("\n[6/6] Aplicando OneHotEncoding a variables categóricas con base en train...")
     dfs["train"], dfs["val"], dfs["test"] = aplicar_ohe_splits(
       dfs["train"], dfs["val"], dfs["test"],
-      columnas=['tipo_comp','tipo_reg','clase_reg','tipo_cta']
+      columnas=['tipo_comp','tipo_reg','clase_reg','tipo_cta','tipo_pres','desc_entidad','cod_bco','cod']
     )
     print("   ✓ OneHotEncoding completado")
 

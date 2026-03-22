@@ -21,157 +21,6 @@ TRIALS = 1000
 SEED = 12345
 TEST_SIZE = 0.2
 
-
-def modelo_base():
-    """
-    Solo variables categoricas y numericas. No incluye pesos ni tf-idf.
-    """
-    # bdd
-    importlib.reload(archivos)    
-    STUDY_NAME = "modelo_base"
-    
-    # Leemos
-    df = archivos.get_modelo_base()
-    
-    # Preparar los datos
-    final_columns = [elemento for elemento in df.columns if elemento != 'target']
-    X = df[final_columns]
-    y = df["target"]
-    
-    # Split
-    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=TEST_SIZE, random_state=SEED)
-    
-    # kappa
-    kappa_scorer = make_scorer(cohen_kappa_score)
-    
-    def cv_es_lgb_objective(trial):
-
-        #Parametros para LightGBM
-        param = {
-            'objective': 'multiclass',
-            'num_class': len(set(y)),  # Número de clases
-            'metric': 'multi_logloss',  # Esto es solo para LightGBM; la métrica de optimización será accuracy
-            'boosting_type': 'gbdt',
-            'learning_rate': trial.suggest_loguniform('learning_rate', 1e-3, 1e-1),
-            'num_leaves': trial.suggest_int('num_leaves', 31, 256),
-            'max_depth': trial.suggest_int('max_depth', -1, 15),
-            'min_child_samples': trial.suggest_int('min_child_samples', 5, 100),
-            'subsample': trial.suggest_uniform('subsample', 0.5, 1.0),
-            'colsample_bytree': trial.suggest_uniform('colsample_bytree', 0.5, 1.0),
-            'reg_alpha': trial.suggest_loguniform('reg_alpha', 1e-8, 1.0),
-            'reg_lambda': trial.suggest_loguniform('reg_lambda', 1e-8, 1.0),
-            'verbose': -1,
-        }
-
-        # Crear el dataset de LightGBM
-        lgb_model = lgb.LGBMClassifier(**param,verbose_eval=False)
-        
-        # Realizar validación cruzada usando Kappa como métrica
-        kappa = cross_val_score(lgb_model, X_train, y_train, cv=3, scoring=kappa_scorer).mean()
-
-        return kappa
-
-    #Genero estudio
-    study = optuna.create_study(direction='maximize', 
-                                    storage=BBDD,  # Specify the storage URL here.
-                                    study_name=f"lightgbm_{STUDY_NAME}",
-                                    load_if_exists=True)
-        
-    #Corro la optimizacion
-    study.optimize(cv_es_lgb_objective, n_trials=TRIALS)
-    
-    
-    # guardamos mejor modelo
-    print(f"[{datetime.now()}] - Mejores hiperparámetros: {study.best_params}\n")
-    best_model = lgb.LGBMClassifier(**study.best_params, verbose_eval=False)
-    print(f"[{datetime.now()}] - Entrenando modelo con los mejores hiperparametros.. \n")
-    best_model.fit(X_train, y_train)
-    joblib.dump(best_model, f'models/lgbm/{STUDY_NAME}/model_{STUDY_NAME}.pkl')           
-    print(f"[{datetime.now()}] - Se ha guardado el modelo en models/lgbm/{STUDY_NAME}/model_{STUDY_NAME}.pkl \n")
-    
-    
-def modelo_text_mining():
-    """
-    Acá usamos los pesos calculados sobre el texto sin tf-idf
-    """    
-    try:
-        # bdd
-        STUDY_NAME = "modelo_text_mining"
-        
-        # Leemos
-        df = archivos.modelo_text_mining()
-        
-        # Eliminamos columnas que nos nos sirven
-        df.drop(columns=['texto_limpio'], inplace=True)
-        
-        # Preparar los datos
-        final_columns = [elemento for elemento in df.columns if elemento != 'target']
-        X = df[final_columns]
-        y = df["target"]
-        
-        # Split
-        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=TEST_SIZE, random_state=SEED)
-        
-        # kappa
-        kappa_scorer = make_scorer(cohen_kappa_score)
-        
-        
-        def cv_es_lgb_objective(trial):
-
-            #Parametros para LightGBM
-            param = {
-                'objective': 'multiclass',
-                'num_class': len(set(y)),  # Número de clases
-                'metric': 'multi_logloss',  # Esto es solo para LightGBM; la métrica de optimización será accuracy
-                'boosting_type': 'gbdt',
-                'learning_rate': trial.suggest_loguniform('learning_rate', 1e-3, 1e-1),
-                'num_leaves': trial.suggest_int('num_leaves', 31, 256),
-                'max_depth': trial.suggest_int('max_depth', -1, 15),
-                'min_child_samples': trial.suggest_int('min_child_samples', 5, 100),
-                'subsample': trial.suggest_uniform('subsample', 0.5, 1.0),
-                'colsample_bytree': trial.suggest_uniform('colsample_bytree', 0.5, 1.0),
-                'reg_alpha': trial.suggest_loguniform('reg_alpha', 1e-8, 1.0),
-                'reg_lambda': trial.suggest_loguniform('reg_lambda', 1e-8, 1.0),
-                'verbose': -1,
-            }
-
-            # Crear el modelo RandomForestClassifier con los parámetros sugeridos
-            lgb_model = lgb.LGBMClassifier(**param,verbose_eval=False)
-
-            # Realizar validación cruzada usando Kappa como métrica
-            kappa = cross_val_score(lgb_model, X_train, y_train, cv=3, scoring=kappa_scorer).mean()
-            
-            return kappa
-  
-
-        #Genero estudio
-        study = optuna.create_study(direction='maximize', 
-                                        storage=BBDD,  # Specify the storage URL here.
-                                        study_name=f"lightgbm_{STUDY_NAME}",
-                                        load_if_exists=True)
-            
-        #Corro la optimizacion
-        study.optimize(cv_es_lgb_objective, n_trials=TRIALS)
-        
-        
-        # guardamos mejor modelo
-        print(f"[{datetime.now()}] - Mejores hiperparámetros: {study.best_params}\n")
-        best_model = lgb.LGBMClassifier(**study.best_params, verbose_eval=False)
-        print(f"[{datetime.now()}] - Entrenando modelo con los mejores hiperparametros.. \n")
-        best_model.fit(X_train, y_train)
-        joblib.dump(best_model, f'models/lgbm/{STUDY_NAME}/model_{STUDY_NAME}.pkl')           
-        print(f"[{datetime.now()}] - Se ha guardado el modelo en models/lgbm/{STUDY_NAME}/model_{STUDY_NAME}.pkl \n")
-    
-    except Exception as e:
-        tb = traceback.format_exc()
-        print(f"Se produjo un error: {e}")
-        print(f"Detalles del error:\n{tb}")
-
-
-
-
-
-
 def modelo_completo(trials, study_name, dataset_dir="./datasets"):
     """
     Acá usamos pesos + tf-idf con los splits preprocesados (train/val/test).
@@ -188,7 +37,7 @@ def modelo_completo(trials, study_name, dataset_dir="./datasets"):
         df_val = pd.read_csv(val_path, sep=';')
 
         # columnas 
-        numeric_columns = get_numeric_columns(df_train)
+        numeric_columns = get_numeric_columns(df_train) # no incluye el target
         text_colummns = ["texto_limpio"]
         pesos_columns = [col for col in numeric_columns if col.startswith('pesos_')]
         numeric_columns = [col for col in numeric_columns if not col.startswith('pesos_')]
@@ -212,7 +61,7 @@ def modelo_completo(trials, study_name, dataset_dir="./datasets"):
             remainder='drop'
         )
 
-        def cv_es_lgb_objective(trial):
+        def lgb_objective(trial):
 
             #Parametros para LightGBM
             param = {
@@ -220,18 +69,19 @@ def modelo_completo(trials, study_name, dataset_dir="./datasets"):
                 'num_class': len(set(y_train)),
                 'metric': 'multi_logloss',
                 'boosting_type': 'gbdt',
-                'learning_rate': trial.suggest_loguniform('learning_rate', 1e-3, 1e-1),
-                'num_leaves': trial.suggest_int('num_leaves', 31, 256),
-                'max_depth': trial.suggest_int('max_depth', -1, 15),
-                'min_child_samples': trial.suggest_int('min_child_samples', 2, 100),
-                'subsample': trial.suggest_uniform('subsample', 0.5, 1.0),
-                'colsample_bytree': trial.suggest_uniform('colsample_bytree', 0.5, 1.0),
-                'reg_alpha': trial.suggest_loguniform('reg_alpha', 1e-8, 1.0),
-                'reg_lambda': trial.suggest_loguniform('reg_lambda', 1e-8, 1.0),
+                'learning_rate': trial.suggest_float('learning_rate', 1e-4, 3e-1, log=True),
+                'num_leaves': trial.suggest_int('num_leaves', 15, 512),
+                'max_depth': trial.suggest_int('max_depth', -1, 30),
+                'min_child_samples': trial.suggest_int('min_child_samples', 1, 200),
+                'subsample': trial.suggest_float('subsample', 0.3, 1.0),
+                'colsample_bytree': trial.suggest_float('colsample_bytree', 0.3, 1.0),
+                'reg_alpha': trial.suggest_float('reg_alpha', 1e-10, 10.0, log=True),
+                'reg_lambda': trial.suggest_float('reg_lambda', 1e-10, 10.0, log=True),
+                'min_split_gain': trial.suggest_float('min_split_gain', 0.0, 1.0),
                 'verbose': -1,
             }
 
-            lgb_model = lgb.LGBMClassifier(**param,verbose_eval=False)
+            lgb_model = lgb.LGBMClassifier(**param)
             
             # Crear pipeline completo
             pipeline = Pipeline([
@@ -248,11 +98,11 @@ def modelo_completo(trials, study_name, dataset_dir="./datasets"):
         #Genero estudio
         study = optuna.create_study(direction='maximize', 
                                         storage=BBDD,  # Specify the storage URL here.
-                                        study_name=f"lightgbm_{study_name}",
+                                        study_name=f"LGBM_{study_name}",
                                         load_if_exists=True)
             
         #Corro la optimizacion
-        study.optimize(cv_es_lgb_objective, n_trials=trials)
+        study.optimize(lgb_objective, n_trials=trials)
         
         
         
@@ -285,86 +135,6 @@ def modelo_completo(trials, study_name, dataset_dir="./datasets"):
   
 
 
-def modelo_tfidf():
-    """
-    Acá usamos solo tf-idf.
-    """   
-    # bdd
-    STUDY_NAME = "modelo_tfidf"
-    
-    # Leemos
-    df = archivos.modelo_text_mining()
-    
-    # columnas      
-    df['texto_limpio'] = df['texto_limpio'].fillna('hola')
-    
-    # Preparar los datos
-    y = df["target"]
-
-    # Convertir texto a TF-IDF
-    vectorizer = TfidfVectorizer()
-    X = vectorizer.fit_transform(df['texto_limpio'])
-
-    # Dividir los datos
-    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=TEST_SIZE, random_state=SEED)
-    
-    # kappa 
-    kappa_scorer = make_scorer(cohen_kappa_score)
-
-    def cv_es_lgb_objective(trial):
-       # Definir los hiperparámetros a optimizar
-        param = {
-            'objective': 'multiclass',
-            'num_class': len(set(y)),  # Número de clases
-            'metric': 'multi_logloss',  # Esto es solo para LightGBM; la métrica de optimización será accuracy
-            'boosting_type': 'gbdt',
-            'learning_rate': trial.suggest_loguniform('learning_rate', 1e-3, 1e-1),
-            'num_leaves': trial.suggest_int('num_leaves', 31, 256),
-            'max_depth': trial.suggest_int('max_depth', -1, 15),
-            'min_child_samples': trial.suggest_int('min_child_samples', 5, 100),
-            'subsample': trial.suggest_uniform('subsample', 0.5, 1.0),
-            'colsample_bytree': trial.suggest_uniform('colsample_bytree', 0.5, 1.0),
-            'reg_alpha': trial.suggest_loguniform('reg_alpha', 1e-8, 1.0),
-            'reg_lambda': trial.suggest_loguniform('reg_lambda', 1e-8, 1.0),
-            'verbose': -1,
-        }
-
-        # Crear y entrenar el modelo
-        lgb_model = lgb.LGBMClassifier(**param,verbose_eval=False)
-
-        # Realizar validación cruzada usando Kappa como métrica
-        kappa = cross_val_score(lgb_model, X_train, y_train, cv=3, scoring=kappa_scorer).mean()
-        
-        return kappa
-    
-    
-    #Genero estudio
-    study = optuna.create_study(direction='maximize', 
-                                    storage=BBDD,  # Specify the storage URL here.
-                                    study_name=f"lightgbm_{STUDY_NAME}",
-                                    load_if_exists=True)
-        
-    #Corro la optimizacion
-    study.optimize(cv_es_lgb_objective, n_trials=TRIALS)
-
-    # Obtener los mejores hiperparámetros
-    print(f"[{datetime.now()}] - Mejores hiperparámetros: {study.best_params}\n")
-    best_model = lgb.LGBMClassifier(**study.best_params, verbose_eval=False)
-    
-    # Entrenar el modelo
-    print(f"[{datetime.now()}] - Entrenando modelo con los mejores hiperparametros.. \n")
-    best_model.fit(X_train, y_train)
-    
-    joblib.dump(best_model, f'models/lgbm/{STUDY_NAME}/model_{STUDY_NAME}.pkl') 
-    print(f"[{datetime.now()}] - Se ha guardado el modelo en models/lgbm/{STUDY_NAME}/model_{STUDY_NAME}.pkl \n")
-
-
-
-
-
-
-
-    
 
 
 def get_numeric_columns(df):
@@ -438,14 +208,15 @@ def model_lightgbm(study_name,ntrials):
             'num_class': len(set(y)),  # Número de clases
             'metric': 'multi_logloss',  # Esto es solo para LightGBM; la métrica de optimización será accuracy
             'boosting_type': 'gbdt',
-            'learning_rate': trial.suggest_loguniform('learning_rate', 1e-3, 1e-1),
-            'num_leaves': trial.suggest_int('num_leaves', 31, 256),
-            'max_depth': trial.suggest_int('max_depth', -1, 15),
-            'min_child_samples': trial.suggest_int('min_child_samples', 5, 100),
-            'subsample': trial.suggest_uniform('subsample', 0.5, 1.0),
-            'colsample_bytree': trial.suggest_uniform('colsample_bytree', 0.5, 1.0),
-            'reg_alpha': trial.suggest_loguniform('reg_alpha', 1e-8, 1.0),
-            'reg_lambda': trial.suggest_loguniform('reg_lambda', 1e-8, 1.0),
+            'learning_rate': trial.suggest_float('learning_rate', 1e-4, 3e-1, log=True),
+            'num_leaves': trial.suggest_int('num_leaves', 15, 512),
+            'max_depth': trial.suggest_int('max_depth', -1, 30),
+            'min_child_samples': trial.suggest_int('min_child_samples', 1, 200),
+            'subsample': trial.suggest_float('subsample', 0.3, 1.0),
+            'colsample_bytree': trial.suggest_float('colsample_bytree', 0.3, 1.0),
+            'reg_alpha': trial.suggest_float('reg_alpha', 1e-10, 10.0, log=True),
+            'reg_lambda': trial.suggest_float('reg_lambda', 1e-10, 10.0, log=True),
+            'min_split_gain': trial.suggest_float('min_split_gain', 0.0, 1.0),
             'verbose': -1,
         }
         

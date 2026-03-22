@@ -1,15 +1,18 @@
 import os
-import pandas as pd
 from datetime import datetime
 import traceback
 import warnings
-import optuna
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.metrics import cohen_kappa_score, accuracy_score
-from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.pipeline import Pipeline
-from sklearn.compose import ColumnTransformer
+
 import joblib
+import optuna
+import pandas as pd
+from sklearn.compose import ColumnTransformer
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.linear_model import LogisticRegression
+from sklearn.metrics import accuracy_score, cohen_kappa_score
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import MaxAbsScaler
+
 
 warnings.filterwarnings("ignore")
 BBDD = "sqlite:///optuna.sqlite3"
@@ -19,8 +22,9 @@ SEED = 12345
 
 def modelo_completo(trials, study_name, dataset_dir="./datasets"):
     """
-    Random Forest con pesos + tf-idf con los splits preprocesados (train/val/test).
-    Optimiza contra df_val y reserva df_test para una etapa posterior.
+    Regresión logística multinomial con pesos + tf-idf con los splits
+    preprocesados (train/val/test). Optimiza contra df_val y reserva
+    df_test para una etapa posterior.
     """
     try:
         dataset_dir = os.path.abspath(dataset_dir)
@@ -48,37 +52,41 @@ def modelo_completo(trials, study_name, dataset_dir="./datasets"):
         X_val = df_val[final_columns]
         y_val = df_val["target"]
 
-        # Definir los transformadores para el pipeline
+        # Definir transformadores para el pipeline
         preprocessor = ColumnTransformer(
             transformers=[
                 ('num', 'passthrough', numeric_columns),
                 ('pesos', 'passthrough', pesos_columns),
-                ('text', TfidfVectorizer(max_features=10000), "texto_limpio")
+                ('text', TfidfVectorizer(max_features=10000), "texto_limpio"),
             ],
-            remainder='drop'
+            remainder='drop',
         )
 
-        def cv_es_rf_objective(trial):
-            rf_params = {
-                'n_estimators': trial.suggest_int('n_estimators', 100, 2000, step=100),
-                'max_depth': trial.suggest_categorical('max_depth', [None, 6, 10, 14, 20, 30, 45, 60]),
-                'min_samples_split': trial.suggest_int('min_samples_split', 2, 50),
-                'min_samples_leaf': trial.suggest_int('min_samples_leaf', 1, 25),
-                'max_features': trial.suggest_categorical('max_features', ['sqrt', 'log2', None, 0.5, 0.8]),
-                'bootstrap': trial.suggest_categorical('bootstrap', [True, False]),
+        def build_model_params(trial):
+            penalty = trial.suggest_categorical('penalty', ['l1', 'l2', 'elasticnet'])
+            params = {
+                'C': trial.suggest_float('C', 1e-3, 100.0, log=True),
+                'penalty': penalty,
+                'solver': 'saga',
+                'max_iter': trial.suggest_int('max_iter', 300, 1500, step=100),
+                'tol': trial.suggest_float('tol', 1e-5, 1e-2, log=True),
                 'class_weight': trial.suggest_categorical('class_weight', [None, 'balanced']),
-                'n_jobs': -1,
                 'random_state': SEED,
+                'n_jobs': -1,
             }
 
-            if rf_params['bootstrap']:
-                rf_params['max_samples'] = trial.suggest_categorical('max_samples', [None, 0.6, 0.8, 0.9])
+            if penalty == 'elasticnet':
+                params['l1_ratio'] = trial.suggest_float('l1_ratio', 0.05, 0.95)
 
-            rf_model = RandomForestClassifier(**rf_params)
+            return params
+
+        def cv_es_logreg_objective(trial):
+            logreg_model = LogisticRegression(**build_model_params(trial))
 
             pipeline = Pipeline([
                 ('preprocessor', preprocessor),
-                ('model', rf_model)
+                ('scale', MaxAbsScaler()),
+                ('model', logreg_model),
             ])
 
             pipeline.fit(X_train, y_train)
@@ -91,23 +99,31 @@ def modelo_completo(trials, study_name, dataset_dir="./datasets"):
         study = optuna.create_study(
             direction='maximize',
             storage=BBDD,
-            study_name=f"RF_{study_name}",
+            study_name=f"logreg_{study_name}",
             load_if_exists=True,
         )
 
         # Corro la optimizacion
-        study.optimize(cv_es_rf_objective, n_trials=trials)
+        study.optimize(cv_es_logreg_objective, n_trials=trials)
 
         # guardamos mejor modelo
         print(f"[{datetime.now()}] - Mejores hiperparámetros: {study.best_params}\\n")
-        best_params = dict(study.best_params)
-        if not best_params.get('bootstrap', False):
-            best_params.pop('max_samples', None)
 
-        best_model = RandomForestClassifier(**best_params, n_jobs=-1, random_state=SEED)
+        best_params = dict(study.best_params)
+        if best_params.get('penalty') != 'elasticnet':
+            best_params.pop('l1_ratio', None)
+
+        best_model = LogisticRegression(
+            **best_params,
+            solver='saga',
+            random_state=SEED,
+            n_jobs=-1,
+        )
+
         pipeline = Pipeline([
             ('preprocessor', preprocessor),
-            ('model', best_model)
+            ('scale', MaxAbsScaler()),
+            ('model', best_model),
         ])
 
         # Entrenamos con train+val para usar el mayor volumen posible antes de evaluar en test
@@ -117,7 +133,7 @@ def modelo_completo(trials, study_name, dataset_dir="./datasets"):
         print(f"[{datetime.now()}] - Entrenando modelo con los mejores hiperparametros.. \\n")
         pipeline.fit(X_full, y_full)
 
-        model_dir = os.path.join("models", "randomforest", study_name)
+        model_dir = os.path.join("models", "logreg", study_name)
         os.makedirs(model_dir, exist_ok=True)
         model_path = os.path.join(model_dir, f"model_{study_name}.pkl")
         joblib.dump(pipeline, model_path)

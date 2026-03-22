@@ -4,12 +4,13 @@ from datetime import datetime
 import traceback
 import warnings
 import optuna
-from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import cohen_kappa_score, accuracy_score
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.pipeline import Pipeline
 from sklearn.compose import ColumnTransformer
 import joblib
+from xgboost import XGBClassifier
+
 
 warnings.filterwarnings("ignore")
 BBDD = "sqlite:///optuna.sqlite3"
@@ -19,10 +20,15 @@ SEED = 12345
 
 def modelo_completo(trials, study_name, dataset_dir="./datasets"):
     """
-    Random Forest con pesos + tf-idf con los splits preprocesados (train/val/test).
+    XGBoost con pesos + tf-idf con los splits preprocesados (train/val/test).
     Optimiza contra df_val y reserva df_test para una etapa posterior.
     """
     try:
+        if XGBClassifier is None:
+            raise ImportError(
+                "No se pudo importar xgboost. Instalalo con: pip install xgboost"
+            )
+
         dataset_dir = os.path.abspath(dataset_dir)
         train_path = os.path.join(dataset_dir, "df_final_train.csv")
         val_path = os.path.join(dataset_dir, "df_final_val.csv")
@@ -48,6 +54,8 @@ def modelo_completo(trials, study_name, dataset_dir="./datasets"):
         X_val = df_val[final_columns]
         y_val = df_val["target"]
 
+        n_classes = int(y_train.nunique())
+
         # Definir los transformadores para el pipeline
         preprocessor = ColumnTransformer(
             transformers=[
@@ -58,27 +66,30 @@ def modelo_completo(trials, study_name, dataset_dir="./datasets"):
             remainder='drop'
         )
 
-        def cv_es_rf_objective(trial):
-            rf_params = {
-                'n_estimators': trial.suggest_int('n_estimators', 100, 2000, step=100),
-                'max_depth': trial.suggest_categorical('max_depth', [None, 6, 10, 14, 20, 30, 45, 60]),
-                'min_samples_split': trial.suggest_int('min_samples_split', 2, 50),
-                'min_samples_leaf': trial.suggest_int('min_samples_leaf', 1, 25),
-                'max_features': trial.suggest_categorical('max_features', ['sqrt', 'log2', None, 0.5, 0.8]),
-                'bootstrap': trial.suggest_categorical('bootstrap', [True, False]),
-                'class_weight': trial.suggest_categorical('class_weight', [None, 'balanced']),
-                'n_jobs': -1,
+        def cv_es_xgb_objective(trial):
+            xgb_params = {
+                'objective': 'multi:softprob',
+                'num_class': n_classes,
+                'eval_metric': 'mlogloss',
+                'tree_method': 'hist',
+                'learning_rate': trial.suggest_float('learning_rate', 1e-3, 0.3, log=True),
+                'n_estimators': trial.suggest_int('n_estimators', 200, 1400, step=100),
+                'max_depth': trial.suggest_int('max_depth', 3, 12),
+                'min_child_weight': trial.suggest_float('min_child_weight', 1.0, 12.0),
+                'subsample': trial.suggest_float('subsample', 0.5, 1.0),
+                'colsample_bytree': trial.suggest_float('colsample_bytree', 0.5, 1.0),
+                'gamma': trial.suggest_float('gamma', 0.0, 5.0),
+                'reg_alpha': trial.suggest_float('reg_alpha', 1e-8, 10.0, log=True),
+                'reg_lambda': trial.suggest_float('reg_lambda', 1e-8, 10.0, log=True),
                 'random_state': SEED,
+                'n_jobs': -1,
             }
 
-            if rf_params['bootstrap']:
-                rf_params['max_samples'] = trial.suggest_categorical('max_samples', [None, 0.6, 0.8, 0.9])
-
-            rf_model = RandomForestClassifier(**rf_params)
+            xgb_model = XGBClassifier(**xgb_params)
 
             pipeline = Pipeline([
                 ('preprocessor', preprocessor),
-                ('model', rf_model)
+                ('model', xgb_model)
             ])
 
             pipeline.fit(X_train, y_train)
@@ -91,20 +102,26 @@ def modelo_completo(trials, study_name, dataset_dir="./datasets"):
         study = optuna.create_study(
             direction='maximize',
             storage=BBDD,
-            study_name=f"RF_{study_name}",
+            study_name=f"xgboost_{study_name}",
             load_if_exists=True,
         )
 
         # Corro la optimizacion
-        study.optimize(cv_es_rf_objective, n_trials=trials)
+        study.optimize(cv_es_xgb_objective, n_trials=trials)
 
         # guardamos mejor modelo
         print(f"[{datetime.now()}] - Mejores hiperparámetros: {study.best_params}\\n")
-        best_params = dict(study.best_params)
-        if not best_params.get('bootstrap', False):
-            best_params.pop('max_samples', None)
 
-        best_model = RandomForestClassifier(**best_params, n_jobs=-1, random_state=SEED)
+        best_model = XGBClassifier(
+            **study.best_params,
+            objective='multi:softprob',
+            num_class=n_classes,
+            eval_metric='mlogloss',
+            tree_method='hist',
+            random_state=SEED,
+            n_jobs=-1,
+        )
+
         pipeline = Pipeline([
             ('preprocessor', preprocessor),
             ('model', best_model)
@@ -117,7 +134,7 @@ def modelo_completo(trials, study_name, dataset_dir="./datasets"):
         print(f"[{datetime.now()}] - Entrenando modelo con los mejores hiperparametros.. \\n")
         pipeline.fit(X_full, y_full)
 
-        model_dir = os.path.join("models", "randomforest", study_name)
+        model_dir = os.path.join("models", "xgboost", study_name)
         os.makedirs(model_dir, exist_ok=True)
         model_path = os.path.join(model_dir, f"model_{study_name}.pkl")
         joblib.dump(pipeline, model_path)
