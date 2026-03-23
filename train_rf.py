@@ -56,19 +56,16 @@ def modelo_completo(trials, study_name, dataset_dir="./datasets"):
 
         def cv_es_rf_objective(trial):
             rf_params = {
-                'n_estimators': trial.suggest_int('n_estimators', 100, 2000, step=100),
-                'max_depth': trial.suggest_categorical('max_depth', [None, 6, 10, 14, 20, 30, 45, 60]),
-                'min_samples_split': trial.suggest_int('min_samples_split', 2, 50),
-                'min_samples_leaf': trial.suggest_int('min_samples_leaf', 1, 25),
-                'max_features': trial.suggest_categorical('max_features', ['sqrt', 'log2', None, 0.5, 0.8]),
+                'n_estimators': trial.suggest_int('n_estimators', 200, 1200, step=100),
+                'max_depth': trial.suggest_categorical('max_depth', [None, 8, 12, 16, 24, 32]),
+                'min_samples_split': trial.suggest_int('min_samples_split', 2, 20),
+                'min_samples_leaf': trial.suggest_int('min_samples_leaf', 1, 10),
+                'max_features': trial.suggest_categorical('max_features', ['sqrt', 'log2']),
                 'bootstrap': trial.suggest_categorical('bootstrap', [True, False]),
                 'class_weight': trial.suggest_categorical('class_weight', [None, 'balanced']),
                 'n_jobs': -1,
                 'random_state': SEED,
             }
-
-            if rf_params['bootstrap']:
-                rf_params['max_samples'] = trial.suggest_categorical('max_samples', [None, 0.6, 0.8, 0.9])
 
             rf_model = RandomForestClassifier(**rf_params)
 
@@ -96,11 +93,7 @@ def modelo_completo(trials, study_name, dataset_dir="./datasets"):
 
         # guardamos mejor modelo
         print(f"[{datetime.now()}] - Mejores hiperparámetros: {study.best_params}\\n")
-        best_params = dict(study.best_params)
-        if not best_params.get('bootstrap', False):
-            best_params.pop('max_samples', None)
-
-        best_model = RandomForestClassifier(**best_params, n_jobs=-1, random_state=SEED)
+        best_model = RandomForestClassifier(**study.best_params, n_jobs=-1, random_state=SEED)
         pipeline = Pipeline([
             ('preprocessor', preprocessor),
             ('model', best_model)
