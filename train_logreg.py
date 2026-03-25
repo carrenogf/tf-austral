@@ -5,12 +5,13 @@ import warnings
 
 import joblib
 import optuna
-import pandas as pd
-from sklearn.compose import ColumnTransformer
+import numpy as np
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import accuracy_score, cohen_kappa_score
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import MaxAbsScaler
+from scipy.sparse import vstack
+from sparse_dataset import load_sparse_split
 
 
 warnings.filterwarnings("ignore")
@@ -27,36 +28,9 @@ def modelo_completo(trials, study_name, dataset_dir="./datasets"):
     """
     try:
         dataset_dir = os.path.abspath(dataset_dir)
-        train_path = os.path.join(dataset_dir, "df_final_train.csv")
-        val_path = os.path.join(dataset_dir, "df_final_val.csv")
-
-        print(f"[{datetime.now()}] - Leyendo train desde {train_path}")
-        df_train = pd.read_csv(train_path, sep=';')
-        print(f"[{datetime.now()}] - Leyendo val desde {val_path}")
-        df_val = pd.read_csv(val_path, sep=';')
-
-        # columnas
-        numeric_columns = get_numeric_columns(df_train)
-        pesos_columns = [col for col in numeric_columns if col.startswith('pesos_')]
-        numeric_columns = [col for col in numeric_columns if not col.startswith('pesos_')]
-        tfidf_columns = [col for col in df_train.columns if col.startswith('tfidf_')]
-        final_columns = numeric_columns + tfidf_columns + pesos_columns
-
-        # Preparar los datos
-        X_train = df_train[final_columns]
-        y_train = df_train["target"]
-        X_val = df_val[final_columns]
-        y_val = df_val["target"]
-
-        # Definir transformadores para el pipeline (sin TF-IDF, ya está hecho en feature engineering)
-        preprocessor = ColumnTransformer(
-            transformers=[
-                ('num', 'passthrough', numeric_columns),
-                ('tfidf', 'passthrough', tfidf_columns),
-                ('pesos', 'passthrough', pesos_columns),
-            ],
-            remainder='drop',
-        )
+        print(f"[{datetime.now()}] - Leyendo train/val en formato sparse desde {dataset_dir}/final_sparse")
+        X_train, y_train = load_sparse_split(dataset_dir, "train")
+        X_val, y_val = load_sparse_split(dataset_dir, "val")
 
         def build_model_params(trial):
             penalty = trial.suggest_categorical('penalty', ['l1', 'l2', 'elasticnet'])
@@ -80,7 +54,6 @@ def modelo_completo(trials, study_name, dataset_dir="./datasets"):
             logreg_model = LogisticRegression(**build_model_params(trial))
 
             pipeline = Pipeline([
-                ('preprocessor', preprocessor),
                 ('scale', MaxAbsScaler()),
                 ('model', logreg_model),
             ])
@@ -117,14 +90,13 @@ def modelo_completo(trials, study_name, dataset_dir="./datasets"):
         )
 
         pipeline = Pipeline([
-            ('preprocessor', preprocessor),
             ('scale', MaxAbsScaler()),
             ('model', best_model),
         ])
 
         # Entrenamos con train+val para usar el mayor volumen posible antes de evaluar en test
-        X_full = pd.concat([X_train, X_val], axis=0)
-        y_full = pd.concat([y_train, y_val], axis=0)
+        X_full = vstack([X_train, X_val], format='csr')
+        y_full = np.concatenate([y_train, y_val])
 
         print(f"[{datetime.now()}] - Entrenando modelo con los mejores hiperparametros.. \\n")
         pipeline.fit(X_full, y_full)
@@ -139,15 +111,6 @@ def modelo_completo(trials, study_name, dataset_dir="./datasets"):
         tb = traceback.format_exc()
         print(f"Se produjo un error: {e}")
         print(f"Detalles del error:\\n{tb}")
-
-
-def get_numeric_columns(df):
-    """
-    Devuelve una lista de columnas numéricas en el DataFrame df.
-    """
-    numeric_cols = df.select_dtypes(include=['number']).columns.tolist()
-    numeric_cols.remove("target")
-    return numeric_cols
 
 
 if __name__ == "__main__":

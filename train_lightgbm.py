@@ -8,11 +8,11 @@ import lightgbm as lgb
 import optuna
 from sklearn.metrics import make_scorer, cohen_kappa_score, accuracy_score
 from sklearn.model_selection import train_test_split, cross_val_score, StratifiedKFold
-from sklearn.pipeline import Pipeline
-from sklearn.compose import ColumnTransformer
+from scipy.sparse import vstack
 import importlib 
 import archivos
 import joblib
+from sparse_dataset import load_sparse_split
 
 warnings.filterwarnings("ignore")
 BBDD = "sqlite:///optuna.sqlite3"
@@ -27,43 +27,16 @@ def modelo_completo(trials, study_name, dataset_dir="./datasets"):
     """
     try:
         dataset_dir = os.path.abspath(dataset_dir)
-        train_path = os.path.join(dataset_dir, "df_final_train.csv")
-        val_path = os.path.join(dataset_dir, "df_final_val.csv")
-
-        print(f"[{datetime.now()}] - Leyendo train desde {train_path}")
-        df_train = pd.read_csv(train_path, sep=';')
-        print(f"[{datetime.now()}] - Leyendo val desde {val_path}")
-        df_val = pd.read_csv(val_path, sep=';')
-
-        # columnas 
-        numeric_columns = get_numeric_columns(df_train) # no incluye el target
-        pesos_columns = [col for col in numeric_columns if col.startswith('pesos_')]
-        numeric_columns = [col for col in numeric_columns if not col.startswith('pesos_')]
-        tfidf_columns = [col for col in df_train.columns if col.startswith('tfidf_')]
-        final_columns = numeric_columns + tfidf_columns + pesos_columns
-
-        # Preparar los datos
-        X_train = df_train[final_columns]
-        y_train = df_train["target"]
-        X_val = df_val[final_columns]
-        y_val = df_val["target"]
-
-        # Definir los transformadores para el pipeline (sin TF-IDF, ya está hecho en feature engineering)
-        preprocessor = ColumnTransformer(
-            transformers=[
-                ('num', 'passthrough', numeric_columns),
-                ('tfidf', 'passthrough', tfidf_columns),
-                ('pesos', 'passthrough', pesos_columns),
-            ],
-            remainder='drop'
-        )
+        print(f"[{datetime.now()}] - Leyendo train/val en formato sparse desde {dataset_dir}/final_sparse")
+        X_train, y_train = load_sparse_split(dataset_dir, "train")
+        X_val, y_val = load_sparse_split(dataset_dir, "val")
 
         def lgb_objective(trial):
 
             #Parametros para LightGBM
             param = {
                 'objective': 'multiclass',
-                'num_class': len(set(y_train)),
+                'num_class': len(set(y_train.tolist())),
                 'metric': 'multi_logloss',
                 'boosting_type': 'gbdt',
                 'learning_rate': trial.suggest_float('learning_rate', 1e-4, 3e-1, log=True),
@@ -78,16 +51,9 @@ def modelo_completo(trials, study_name, dataset_dir="./datasets"):
                 'verbose': -1,
             }
 
-            lgb_model = lgb.LGBMClassifier(**param)
-            
-            # Crear pipeline completo
-            pipeline = Pipeline([
-                ('preprocessor', preprocessor),
-                ('model', lgb_model)
-            ])
-
-            pipeline.fit(X_train, y_train)
-            preds_val = pipeline.predict(X_val)
+            model = lgb.LGBMClassifier(**param)
+            model.fit(X_train, y_train)
+            preds_val = model.predict(X_val)
             kappa = cohen_kappa_score(y_val, preds_val)
             trial.set_user_attr("val_accuracy", accuracy_score(y_val, preds_val))
             return kappa
@@ -105,23 +71,19 @@ def modelo_completo(trials, study_name, dataset_dir="./datasets"):
         
         # guardamos mejor modelo
         print(f"[{datetime.now()}] - Mejores hiperparámetros: {study.best_params}\n")
-        best_model = lgb.LGBMClassifier(**study.best_params, verbose_eval=False)
-        pipeline = Pipeline([
-            ('preprocessor', preprocessor),
-            ('model', best_model)
-        ])
+        model = lgb.LGBMClassifier(**study.best_params, verbose_eval=False)
 
         # Entrenamos con train+val para usar el mayor volumen posible antes de evaluar en test
-        X_full = pd.concat([X_train, X_val], axis=0)
-        y_full = pd.concat([y_train, y_val], axis=0)
+        X_full = vstack([X_train, X_val], format='csr')
+        y_full = np.concatenate([y_train, y_val])
 
         print(f"[{datetime.now()}] - Entrenando modelo con los mejores hiperparametros.. \n")
-        pipeline.fit(X_full, y_full)
+        model.fit(X_full, y_full)
 
         model_dir = os.path.join("models", "lgbm", study_name)
         os.makedirs(model_dir, exist_ok=True)
         model_path = os.path.join(model_dir, f'model_{study_name}.pkl')
-        joblib.dump(pipeline, model_path)
+        joblib.dump(model, model_path)
         print(f"[{datetime.now()}] - Se ha guardado el modelo en {model_path} \n")
     
 

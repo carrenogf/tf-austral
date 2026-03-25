@@ -5,6 +5,7 @@ import json
 import traceback
 import re
 from collections import Counter
+from scipy import sparse
 from sklearn.preprocessing import StandardScaler
 from sklearn.feature_extraction.text import TfidfVectorizer
 import joblib
@@ -87,16 +88,8 @@ def fe(dataset_dir="./datasets"):
     dfs["val"] = _align_to_base(dfs["val"], train_cols)
     dfs["test"] = _align_to_base(dfs["test"], train_cols)
 
-    # Guardamos
-    paths_out = {
-      "train": os.path.join(dataset_dir, "df_final_train.csv"),
-      "val": os.path.join(dataset_dir, "df_final_val.csv"),
-      "test": os.path.join(dataset_dir, "df_final_test.csv"),
-    }
-    print("\nGuardando datos finales...")
-    for split, df in dfs.items():
-      df.to_csv(paths_out[split], index=False, sep=';')
-      print(f"   ✓ {split}: {paths_out[split]}")
+    print("\nGuardando datos finales en formato sparse...")
+    save_sparse_splits(dfs, dataset_dir)
     
     print("\n" + "="*60)
     print("¡Feature Engineering completado exitosamente!")
@@ -416,44 +409,103 @@ def _align_to_base(df, base_cols):
   return df[base_cols]
 
 
+def _safe_tfidf_max_features(train_rows, requested_max_features):
+  """
+  Ajusta max_features para evitar explosiones de memoria en datasets grandes.
+  """
+  if train_rows >= 100000 and requested_max_features > 3000:
+    return 3000
+  if train_rows >= 50000 and requested_max_features > 5000:
+    return 5000
+  return requested_max_features
+
+
+def _tfidf_to_sparse_df(matrix, index):
+  """
+  Convierte matriz sparse TF-IDF a DataFrame sparse de pandas.
+  """
+  cols = [f'tfidf_{i}' for i in range(matrix.shape[1])]
+  tfidf_df = pd.DataFrame.sparse.from_spmatrix(matrix, columns=cols)
+  tfidf_df.index = index
+  return tfidf_df
+
+
+def _as_sparse_dataframe(df_features):
+  """
+  Convierte todas las columnas a SparseArray float32 para exportar a scipy.sparse.
+  """
+  sparse_df = pd.DataFrame(index=df_features.index)
+  for col in df_features.columns:
+    values = pd.to_numeric(df_features[col], errors='coerce').fillna(0.0).to_numpy(dtype=np.float32)
+    sparse_df[col] = pd.arrays.SparseArray(values, fill_value=0.0)
+  return sparse_df
+
+
+def save_sparse_splits(dfs, dataset_dir):
+  """
+  Guarda train/val/test como matrices scipy.sparse + labels + metadata de columnas.
+  """
+  sparse_dir = os.path.join(dataset_dir, "final_sparse")
+  os.makedirs(sparse_dir, exist_ok=True)
+
+  feature_cols = [col for col in dfs["train"].columns if col != "target"]
+  cols_path = os.path.join(sparse_dir, "feature_columns.json")
+  with open(cols_path, 'w') as file:
+    json.dump(feature_cols, file, indent=2)
+
+  for split, df in dfs.items():
+    aligned_df = df.reindex(columns=feature_cols + ["target"], fill_value=0)
+    y = pd.to_numeric(aligned_df["target"], errors='coerce').fillna(0).to_numpy(dtype=np.int64)
+
+    X_sparse_df = _as_sparse_dataframe(aligned_df[feature_cols])
+    X = X_sparse_df.sparse.to_coo().tocsr().astype(np.float32)
+
+    x_path = os.path.join(sparse_dir, f"{split}_X.npz")
+    y_path = os.path.join(sparse_dir, f"{split}_y.npy")
+    sparse.save_npz(x_path, X, compressed=True)
+    np.save(y_path, y)
+    print(f"   ✓ {split}: X={x_path} (shape={X.shape}), y={y_path}")
+
+  print(f"   ✓ Columnas de features guardadas en {cols_path}")
+
+
 def aplicar_tfidf(dfs, dataset_dir, max_features=10000):
   """
   Entrena TfidfVectorizer solo en train y aplica a val/test.
   Guarda el vectorizer para uso posterior en entrenamiento.
   Reemplaza la columna 'texto_limpio' con características TF-IDF.
   """
+  train_rows = len(dfs["train"])
+  safe_max_features = _safe_tfidf_max_features(train_rows, max_features)
+  if safe_max_features < max_features:
+    print(
+      f"   - Ajustando max_features de {max_features} a {safe_max_features} "
+      f"para evitar uso excesivo de memoria (train_rows={train_rows})"
+    )
+
   print("   - Entrenando TfidfVectorizer en train...")
   
   # Entrenar TfidfVectorizer solo en train
-  tfidf = TfidfVectorizer(max_features=max_features, strip_accents='unicode', lowercase=True)
-  tfidf_train = tfidf.fit_transform(dfs["train"]['texto_limpio'].fillna(''))
-  
-  # Convertir a DataFrame
-  tfidf_train_df = pd.DataFrame(
-    tfidf_train.toarray(),
-    columns=[f'tfidf_{i}' for i in range(tfidf_train.shape[1])],
-    index=dfs["train"].index
+  tfidf = TfidfVectorizer(
+    max_features=safe_max_features,
+    strip_accents='unicode',
+    lowercase=True,
+    dtype=np.float32
   )
+  tfidf_train = tfidf.fit_transform(dfs["train"]['texto_limpio'].fillna(''))
+  tfidf_train_df = _tfidf_to_sparse_df(tfidf_train, dfs["train"].index)
   
   # Aplicar a val y test
   print("   - Aplicando TfidfVectorizer a val y test...")
   tfidf_val = tfidf.transform(dfs["val"]['texto_limpio'].fillna(''))
-  tfidf_val_df = pd.DataFrame(
-    tfidf_val.toarray(),
-    columns=[f'tfidf_{i}' for i in range(tfidf_val.shape[1])],
-    index=dfs["val"].index
-  )
+  tfidf_val_df = _tfidf_to_sparse_df(tfidf_val, dfs["val"].index)
   
   tfidf_test = tfidf.transform(dfs["test"]['texto_limpio'].fillna(''))
-  tfidf_test_df = pd.DataFrame(
-    tfidf_test.toarray(),
-    columns=[f'tfidf_{i}' for i in range(tfidf_test.shape[1])],
-    index=dfs["test"].index
-  )
+  tfidf_test_df = _tfidf_to_sparse_df(tfidf_test, dfs["test"].index)
   
   # Remover la columna 'texto_limpio' original y agregar TF-IDF
   for split, tfidf_df in [("train", tfidf_train_df), ("val", tfidf_val_df), ("test", tfidf_test_df)]:
-    # Concatenar TF-IDF features (sin remover texto_limpio por ahora, lo haremos después)
+    dfs[split] = dfs[split].drop(columns=['texto_limpio'])
     dfs[split] = pd.concat([dfs[split], tfidf_df], axis=1)
   
   # Guardar el vectorizer para reutilización
