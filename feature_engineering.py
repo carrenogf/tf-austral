@@ -6,6 +6,8 @@ import traceback
 import re
 from collections import Counter
 from sklearn.preprocessing import StandardScaler
+from sklearn.feature_extraction.text import TfidfVectorizer
+import joblib
 
 
 TOKEN_PATTERN = re.compile(r"\b\w{2,}\b", flags=re.UNICODE)
@@ -70,12 +72,16 @@ def fe(dataset_dir="./datasets"):
       dfs[split] = asignar_pesos_bigrams_al_texto(dfs[split], dict_bigrams, bigram_targets)
       print(f"   ✓ Pesos asignados para {split}")
     
+    # Aplicar TF-IDF al texto
+    print("\n[8/8] Aplicando TF-IDF al texto limpio...")
+    tfidf_vectorizer = aplicar_tfidf(dfs, dataset_dir)
+    print(f"   ✓ TF-IDF aplicado a todos los splits")
+    
     # Estandarizacion de pesos
-    print("\n[8/8] Estandarizando pesos con scaler del train...")
+    print("\n[9/9] Estandarizando pesos con scaler del train...")
     dfs["train"], scaler = estandarizar_pesos(dfs["train"], scaler=None)
     dfs["val"], _ = estandarizar_pesos(dfs["val"], scaler=scaler)
     dfs["test"], _ = estandarizar_pesos(dfs["test"], scaler=scaler)
-    
     # Alinear columnas con base en train por si falta algun peso
     train_cols = dfs["train"].columns
     dfs["val"] = _align_to_base(dfs["val"], train_cols)
@@ -408,3 +414,51 @@ def _align_to_base(df, base_cols):
   if extra:
     df.drop(columns=extra, inplace=True)
   return df[base_cols]
+
+
+def aplicar_tfidf(dfs, dataset_dir, max_features=10000):
+  """
+  Entrena TfidfVectorizer solo en train y aplica a val/test.
+  Guarda el vectorizer para uso posterior en entrenamiento.
+  Reemplaza la columna 'texto_limpio' con características TF-IDF.
+  """
+  print("   - Entrenando TfidfVectorizer en train...")
+  
+  # Entrenar TfidfVectorizer solo en train
+  tfidf = TfidfVectorizer(max_features=max_features, strip_accents='unicode', lowercase=True)
+  tfidf_train = tfidf.fit_transform(dfs["train"]['texto_limpio'].fillna(''))
+  
+  # Convertir a DataFrame
+  tfidf_train_df = pd.DataFrame(
+    tfidf_train.toarray(),
+    columns=[f'tfidf_{i}' for i in range(tfidf_train.shape[1])],
+    index=dfs["train"].index
+  )
+  
+  # Aplicar a val y test
+  print("   - Aplicando TfidfVectorizer a val y test...")
+  tfidf_val = tfidf.transform(dfs["val"]['texto_limpio'].fillna(''))
+  tfidf_val_df = pd.DataFrame(
+    tfidf_val.toarray(),
+    columns=[f'tfidf_{i}' for i in range(tfidf_val.shape[1])],
+    index=dfs["val"].index
+  )
+  
+  tfidf_test = tfidf.transform(dfs["test"]['texto_limpio'].fillna(''))
+  tfidf_test_df = pd.DataFrame(
+    tfidf_test.toarray(),
+    columns=[f'tfidf_{i}' for i in range(tfidf_test.shape[1])],
+    index=dfs["test"].index
+  )
+  
+  # Remover la columna 'texto_limpio' original y agregar TF-IDF
+  for split, tfidf_df in [("train", tfidf_train_df), ("val", tfidf_val_df), ("test", tfidf_test_df)]:
+    # Concatenar TF-IDF features (sin remover texto_limpio por ahora, lo haremos después)
+    dfs[split] = pd.concat([dfs[split], tfidf_df], axis=1)
+  
+  # Guardar el vectorizer para reutilización
+  vectorizer_path = os.path.join(dataset_dir, "tfidf_vectorizer.pkl")
+  joblib.dump(tfidf, vectorizer_path)
+  print(f"   ✓ TfidfVectorizer guardado en {vectorizer_path}")
+  
+  return tfidf

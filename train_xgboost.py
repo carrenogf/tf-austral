@@ -5,7 +5,6 @@ import traceback
 import warnings
 import optuna
 from sklearn.metrics import cohen_kappa_score, accuracy_score
-from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.pipeline import Pipeline
 from sklearn.compose import ColumnTransformer
 import joblib
@@ -40,13 +39,10 @@ def modelo_completo(trials, study_name, dataset_dir="./datasets"):
 
         # columnas
         numeric_columns = get_numeric_columns(df_train)
-        text_columns = ["texto_limpio"]
         pesos_columns = [col for col in numeric_columns if col.startswith('pesos_')]
         numeric_columns = [col for col in numeric_columns if not col.startswith('pesos_')]
-        final_columns = numeric_columns + text_columns + pesos_columns
-
-        df_train['texto_limpio'] = df_train['texto_limpio'].fillna('')
-        df_val['texto_limpio'] = df_val['texto_limpio'].fillna('')
+        tfidf_columns = [col for col in df_train.columns if col.startswith('tfidf_')]
+        final_columns = numeric_columns + tfidf_columns + pesos_columns
 
         # Preparar los datos
         X_train = df_train[final_columns]
@@ -56,12 +52,12 @@ def modelo_completo(trials, study_name, dataset_dir="./datasets"):
 
         n_classes = int(y_train.nunique())
 
-        # Definir los transformadores para el pipeline
+        # Definir los transformadores para el pipeline (sin TF-IDF, ya está hecho en feature engineering)
         preprocessor = ColumnTransformer(
             transformers=[
                 ('num', 'passthrough', numeric_columns),
+                ('tfidf', 'passthrough', tfidf_columns),
                 ('pesos', 'passthrough', pesos_columns),
-                ('text', TfidfVectorizer(max_features=10000), "texto_limpio")
             ],
             remainder='drop'
         )
